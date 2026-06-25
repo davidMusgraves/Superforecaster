@@ -1,0 +1,30 @@
+# Secrets
+.env
+*.pem
+keys/
+
+# Data / artifacts
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+data/*.db
+data/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Packaging / build artifacts
+build/
+dist/
+superforecaster-*/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

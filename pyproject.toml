@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "superforecaster"
+version = "0.1.0"
+description = "Multi-source, calibrated probabilistic forecaster (calibrator, scoring, priors, evidence)."
+readme = "README.md"
+# 3.10+ so the pure scoring/calibrator dev loop runs in 3.10, and the bot's
+# 3.11 poetry env (which has forecasting_tools) also satisfies it.
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "numpy>=1.26",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# LLM outside-view priors + headline classification (not needed for the
+# calibrator/scoring path the bot uses in B1).
+llm = ["anthropic>=0.39"]
+# The backtest loader pulls resolved questions through the bot's SDK. It is an
+# extra so a plain `pip install superforecaster` stays light; install this in an
+# environment that already has Python >=3.11 if you want the loader.
+backtest = ["forecasting-tools>=0.2.90"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["forecaster*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
