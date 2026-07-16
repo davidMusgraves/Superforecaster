@@ -5,6 +5,10 @@ from __future__ import annotations
 import math
 
 from forecaster.backtest.harness import _loo_base_rate_pairs, run_backtest
+from forecaster.backtest.metaculus_loader import (
+    _outcome_from_detail,
+    _outcome_from_raw_resolution,
+)
 from forecaster.backtest.records import (
     ResolvedRecord,
     load_records,
@@ -98,3 +102,18 @@ def test_by_category_breakdown():
     rep = run_backtest(recs)
     assert set(rep.by_category_brier) == {"econ", "geo"}
     assert rep.by_category_brier["econ"]["n"] == 2
+
+
+def test_outcome_from_raw_resolution():
+    assert _outcome_from_raw_resolution("yes") == 1
+    assert _outcome_from_raw_resolution("no") == 0
+    assert _outcome_from_raw_resolution(1.0) == 1
+    assert _outcome_from_raw_resolution(0) == 0
+    assert _outcome_from_raw_resolution("annulled") is None
+    assert _outcome_from_raw_resolution(None) is None
+
+
+def test_outcome_from_detail_json():
+    assert _outcome_from_detail({"question": {"resolution": "yes"}}) == 1
+    assert _outcome_from_detail({"question": {"resolution": 0.0}}) == 0
+    assert _outcome_from_detail({"question": {"resolution": None}}) is None
