@@ -30,11 +30,18 @@ def loo_brier_comparison(
     n_bins: int = 5,
     prior_strength: float = 15.0,
     min_obs: int = 8,
+    min_n: int = 30,
+    margin: float = 0.002,
 ) -> dict:
     """Fit a CalibratorSet on ``rows`` and compare leave-one-out Brier.
 
+    Deploy criteria (``improved``): the track record must have at least ``min_n``
+    resolved rows AND calibration must beat raw LOO Brier by at least ``margin``.
+    The floor guards against a lucky fit on ~10 resolutions; the margin guards
+    against deploying a change that's within noise.
+
     Returns a dict with n, brier_raw, brier_cal, improvement (raw - cal; positive
-    means calibration helps), and ``improved`` (bool).
+    means calibration helps), improved (bool), and the min_n/margin used.
     """
     if not rows:
         return {
@@ -66,12 +73,19 @@ def loo_brier_comparison(
         if brier_raw is not None and brier_cal is not None
         else None
     )
+    improved = bool(
+        improvement is not None
+        and improvement >= margin
+        and len(rows) >= min_n
+    )
     return {
         "n": len(rows),
         "brier_raw": brier_raw,
         "brier_cal": brier_cal,
         "improvement": improvement,
-        "improved": bool(improvement is not None and improvement > 0),
+        "improved": improved,
+        "min_n": min_n,
+        "margin": margin,
     }
 
 
@@ -82,13 +96,21 @@ def fit_and_gate(
     n_bins: int = 5,
     prior_strength: float = 15.0,
     min_obs: int = 8,
+    min_n: int = 30,
+    margin: float = 0.002,
 ) -> dict:
     """Evaluate via leave-one-out, and save a full-fit CalibratorSet to
-    ``out_path`` ONLY if it improves LOO Brier. Returns the comparison dict plus
-    ``saved`` and ``out_path``.
+    ``out_path`` ONLY if it clears the deploy gate (≥ ``min_n`` rows and LOO Brier
+    better by ≥ ``margin``). Returns the comparison dict plus ``saved`` and
+    ``out_path``.
     """
     result = loo_brier_comparison(
-        rows, n_bins=n_bins, prior_strength=prior_strength, min_obs=min_obs
+        rows,
+        n_bins=n_bins,
+        prior_strength=prior_strength,
+        min_obs=min_obs,
+        min_n=min_n,
+        margin=margin,
     )
     saved = False
     if out_path and result["improved"]:
@@ -110,6 +132,7 @@ def format_gate(result: dict) -> str:
         f"raw Brier         : {result['brier_raw']}",
         f"calibrated Brier  : {result['brier_cal']}",
         f"improvement       : {result['improvement']}  (positive = helps)",
+        f"criteria          : n >= {result.get('min_n', '?')} and improvement >= {result.get('margin', '?')}",
         f"verdict           : {'DEPLOY' if result['improved'] else 'DO NOT DEPLOY'}",
     ]
     if "saved" in result:

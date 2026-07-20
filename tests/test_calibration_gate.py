@@ -62,3 +62,22 @@ def test_fit_and_gate_saves_only_when_improved(tmp_path):
     assert r2["improved"] is False
     assert r2["saved"] is False
     assert not os.path.exists(out2)  # not deployed
+
+
+def test_floor_blocks_small_n():
+    # Overconfident data that WOULD help, but too few rows for the default floor.
+    rows = _rows("weather", 0.90, n_yes=12, n_no=8)  # n = 20 < default min_n (30)
+    blocked = loo_brier_comparison(rows, prior_strength=2.0, min_obs=5)
+    assert blocked["improved"] is False
+    # Lower the floor below n and the same data deploys — isolating the floor.
+    allowed = loo_brier_comparison(rows, prior_strength=2.0, min_obs=5, min_n=10)
+    assert allowed["improved"] is True
+
+
+def test_margin_blocks_within_noise_improvement():
+    # A real but small improvement is blocked when it's below the margin.
+    rows = _rows("weather", 0.90, n_yes=60, n_no=40)  # improves ~0.085
+    tight = loo_brier_comparison(rows, prior_strength=2.0, min_obs=5, margin=0.5)
+    assert tight["improved"] is False
+    loose = loo_brier_comparison(rows, prior_strength=2.0, min_obs=5, margin=0.001)
+    assert loose["improved"] is True
