@@ -28,6 +28,11 @@ def _int_id(ticker: str) -> int:
     return int(hashlib.md5(ticker.encode()).hexdigest()[:12], 16)
 
 
+def _series_of(ticker: str) -> str:
+    """Series prefix of a Kalshi market ticker (e.g. 'KXFED-25DEC-T3.00' -> 'KXFED')."""
+    return ticker.split("-", 1)[0] if ticker else "?"
+
+
 def _outcome(result) -> int | None:
     """1 for yes, 0 for no, None for void/unsettled."""
     r = str(result or "").strip().lower()
@@ -126,3 +131,50 @@ def fetch_settled_binary(
         f"({'event-deduped' if dedupe_by_event else 'no dedupe'})."
     )
     return records
+
+
+def summarize_series(
+    scan: int = 1500,
+    base_url: str = KALSHI_PROD,
+    timeout: float = 20.0,
+) -> list[tuple[str, int, str]]:
+    """Tally EVENT-DEDUPED settled binary markets by series prefix, with a sample
+    title — so you can pick a well-populated CLEAN series (econ/politics) for a
+    Tier-1 screen instead of guessing a ticker. Returns (series, n_events, sample)
+    sorted by count. ``scan`` caps how many settled markets to walk."""
+    import httpx
+    from collections import Counter
+
+    counts: Counter[str] = Counter()
+    samples: dict[str, str] = {}
+    seen_events: set[str] = set()
+    cursor: str | None = None
+    walked = 0
+    page = min(1000, max(100, scan))
+    with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as client:
+        while walked < scan:
+            params: dict = {"status": "settled", "limit": page}
+            if cursor:
+                params["cursor"] = cursor
+            resp = client.get(f"{base_url}/markets", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            markets = data.get("markets", [])
+            if not markets:
+                break
+            for m in markets:
+                ev = m.get("event_ticker")
+                if ev:
+                    if ev in seen_events:
+                        continue
+                    seen_events.add(ev)
+                if _outcome(m.get("result")) is None:
+                    continue
+                s = _series_of(m.get("ticker") or "")
+                counts[s] += 1
+                samples.setdefault(s, str(m.get("title", "") or ""))
+                walked += 1
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+    return [(s, c, samples.get(s, "")) for s, c in counts.most_common()]

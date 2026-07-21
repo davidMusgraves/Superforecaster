@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from forecaster.backtest.kalshi_loader import _int_id, _outcome, _to_record
+from forecaster.backtest.kalshi_loader import _int_id, _outcome, _series_of, _to_record
+
+
+def test_series_of():
+    assert _series_of("KXFED-25DEC-T3.00") == "KXFED"
+    assert _series_of("KXHIGHNY-24DEC31-B45") == "KXHIGHNY"
+    assert _series_of("NOHYPHEN") == "NOHYPHEN"
+    assert _series_of("") == "?"
 
 
 def test_outcome_mapping():
