@@ -347,6 +347,118 @@ async def fetch_resolved_binary(
     return records
 
 
+async def probe_tournament(
+    tournaments: list[str | int] | None,
+    limit: int = 60,
+    num_forecasters_gte: int = 0,
+    cutoff: str | None = None,
+    *,
+    request_delay: float = 3.5,
+    max_detail_tries: int = 6,
+) -> dict:
+    """Report whether a tournament/series is USABLE for a leak-free backtest,
+    without writing a cache. Prints and returns four counts:
+
+      discovered        : resolved binary questions the filter found
+      with_resolution   : outcome actually exposed to your token (the gate — if this
+                          is ~0, Metaculus is withholding and the series is unusable)
+      with_cp / cp_hist : have a community prediction / a lead-time CP *history*
+                          (>=2 points), i.e. a non-omniscient crowd baseline exists
+      post_cutoff       : of the resolved ones, how many resolved AFTER --cutoff
+                          (the leak-free subset a current model can be scored on)
+    """
+    import os
+    from datetime import date, datetime
+
+    ApiFilter, MetaculusApi = _import_sdk()
+    token = os.getenv("METACULUS_TOKEN")
+    api_filter = ApiFilter(
+        allowed_statuses=["resolved"],
+        allowed_types=["binary"],
+        allowed_tournaments=tournaments,
+        num_forecasters_gte=num_forecasters_gte or None,
+    )
+    questions = await MetaculusApi.get_questions_matching_filter(
+        api_filter, num_questions=limit, error_if_question_target_missed=False
+    )
+    cutoff_date: date | None = None
+    if cutoff:
+        cutoff_date = datetime.fromisoformat(cutoff).date()
+
+    discovered = len(questions)
+    with_resolution = with_cp = cp_hist = post_cutoff = detail_errors = 0
+    last_request_at = [0.0]
+    print(
+        f"Discovered {discovered} resolved binary questions for {tournaments}; "
+        f"probing detail endpoint ({request_delay:.1f}s spacing, ~"
+        f"{discovered * request_delay / 60:.0f} min)..."
+    )
+    for i, q in enumerate(questions, 1):
+        qid = getattr(q, "id_of_post", None)
+        if qid is None:
+            continue
+        try:
+            detail = _fetch_detail_json(
+                qid,
+                token,
+                max_tries=max_detail_tries,
+                request_delay=request_delay,
+                _last_request_at=last_request_at,
+            )
+        except Exception:
+            detail_errors += 1
+            continue
+        if _outcome_from_detail(detail) is None:
+            continue
+        with_resolution += 1
+        if _cp_from_detail(detail) is not None:
+            with_cp += 1
+        agg = (
+            ((detail.get("question") or {}).get("aggregations") or {}).get(
+                "recency_weighted"
+            )
+            or {}
+        )
+        if len(agg.get("history") or []) >= 2:
+            cp_hist += 1
+        if cutoff_date is not None:
+            rt = getattr(q, "actual_resolution_time", None) or getattr(
+                q, "scheduled_resolution_time", None
+            )
+            if rt is not None and rt.date() >= cutoff_date:
+                post_cutoff += 1
+        if i % 20 == 0:
+            print(f"  ...{i}/{discovered} (resolution exposed: {with_resolution})")
+
+    print(
+        "\n=== PROBE RESULT ===\n"
+        f"  discovered        : {discovered}\n"
+        f"  with_resolution   : {with_resolution}   <- the gate (0 => withheld)\n"
+        f"  with_cp           : {with_cp}\n"
+        f"  cp_history(>=2)   : {cp_hist}   <- lead-time crowd baseline available\n"
+        f"  post_cutoff(>={cutoff}) : {post_cutoff}   <- leak-free backtest questions\n"
+        f"  detail_errors     : {detail_errors}"
+    )
+    verdict = (
+        "UNUSABLE — resolution withheld (bot-maker access or forecasted-only needed)"
+        if with_resolution == 0
+        else (
+            f"USABLE for a leak-free screen: {post_cutoff} post-cutoff questions"
+            if (cutoff_date is not None and post_cutoff)
+            else "resolution exposed, but few/none post-cutoff (mostly leaky/old)"
+        )
+    )
+    print(f"  verdict           : {verdict}\n")
+    return {
+        "discovered": discovered,
+        "with_resolution": with_resolution,
+        "with_cp": with_cp,
+        "cp_history": cp_hist,
+        "post_cutoff": post_cutoff,
+        "detail_errors": detail_errors,
+    }
+
+
 def write_sample_cache(path: str | Path, n: int = 12) -> None:
     """Write a tiny synthetic cache so harness.py can be exercised offline."""
     from pathlib import Path
@@ -439,12 +551,35 @@ def main() -> None:
         metavar="PATH",
         help="Write a synthetic cache for harness smoke tests and exit (no API calls).",
     )
-    p.add_argument("--out", help="Output cache JSON path (required unless --write-sample)")
+    p.add_argument(
+        "--probe",
+        action="store_true",
+        help="Report usability counts (resolution exposed / post-cutoff) and exit; "
+        "writes nothing. Use with --tournament and --cutoff.",
+    )
+    p.add_argument(
+        "--cutoff",
+        help="Model training-cutoff date (ISO) for the post-cutoff (leak-free) count.",
+    )
+    p.add_argument("--out", help="Output cache JSON path (required unless --write-sample/--probe)")
     args = p.parse_args()
 
     if args.write_sample:
         write_sample_cache(args.write_sample)
         print(f"Wrote sample cache -> {args.write_sample}")
+        return
+
+    if args.probe:
+        asyncio.run(
+            probe_tournament(
+                tournaments=args.tournaments,
+                limit=args.limit,
+                num_forecasters_gte=args.num_forecasters_gte,
+                cutoff=args.cutoff,
+                request_delay=args.request_delay,
+                max_detail_tries=args.max_detail_tries,
+            )
+        )
         return
 
     if not args.out:
