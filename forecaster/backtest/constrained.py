@@ -73,6 +73,7 @@ def score_config(records: list[ResolvedRecord], forecasts: dict[int, float]) -> 
 def compare_configs(
     records: list[ResolvedRecord],
     forecasts_by_config: dict[str, dict[int, float]],
+    mes: float = 0.01,
 ) -> dict:
     """Per-config Brier/log plus a PAIRED Brier comparison for each config pair,
     over the questions both configs forecasted. ``forecasts_by_config`` maps a
@@ -96,7 +97,7 @@ def compare_configs(
                 for q in outcomes
                 if q in fa and q in fb
             ]
-            pairs[f"{a} vs {b}"] = paired_brier(triples)
+            pairs[f"{a} vs {b}"] = paired_brier(triples, mes=mes)
 
     return {
         "n_records": len(records),
@@ -124,7 +125,7 @@ def format_comparison(result: dict) -> str:
         if r.get("n"):
             lines.append(
                 f"  {pair}: n={r['n']} mean_diff={r['mean_diff']} "
-                f"sign_p={r['sign_test_p']} -> {r['verdict']}"
+                f"CI95={r['ci95']} wilcoxon_p={r['wilcoxon_p']} -> {r['verdict']}"
             )
         else:
             lines.append(f"  {pair}: no overlapping resolved questions")

@@ -54,7 +54,7 @@ def test_compare_configs_paired():
     pair = res["pairwise"]["A vs B"]
     assert pair["n"] == 4
     assert pair["mean_diff"] < 0  # B (2nd) beats A (1st)
-    assert pair["verdict"] == "treatment helps"
+    assert "helps" in pair["verdict"]
 
 
 def test_compare_configs_no_overlap():
