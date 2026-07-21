@@ -54,8 +54,11 @@ def _to_record(m: dict) -> ResolvedRecord | None:
     cp = round(lp / 100.0, 4) if isinstance(lp, (int, float)) else None
     if cp is not None and not 0.0 <= cp <= 1.0:
         cp = None
-    subtitle = m.get("yes_sub_title") or m.get("subtitle") or ""
-    text = f"{m.get('title', '')} {subtitle}".strip() or ticker
+    title = str(m.get("title", "") or "")
+    subtitle = str(m.get("yes_sub_title") or m.get("subtitle") or "")
+    # Avoid the common case where the subtitle just repeats the title.
+    text = title if subtitle and subtitle in title else f"{title} {subtitle}".strip()
+    text = text or ticker
     return ResolvedRecord(
         question_id=_int_id(ticker),
         question_text=text,
