@@ -26,12 +26,14 @@ def test_to_record_maps_settled_market():
         "yes_sub_title": "45F or higher",
         "result": "yes",
         "last_price": 88,  # cents -> 0.88
+        "open_time": "2024-12-01T00:00:00Z",
         "close_time": "2024-12-31T23:59:00Z",
     }
     r = _to_record(m)
     assert r.outcome == 1
     assert r.community_prob == 0.88
     assert r.url == "kalshi:KXHIGHNY-24DEC31-B45"
+    assert r.open_time == "2024-12-01T00:00:00+00:00"   # for the lifetime cap
     assert r.resolve_time == "2024-12-31T23:59:00+00:00"  # Z normalized
     assert "45F or higher" in r.question_text
     assert r.source == "kalshi"

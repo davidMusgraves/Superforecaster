@@ -66,6 +66,8 @@ def _to_record(m: dict) -> ResolvedRecord | None:
         outcome=outcome,
         community_prob=cp,
         cp_is_final=True,
+        open_time=_norm_time(m.get("open_time")),
+        close_time=_norm_time(m.get("close_time")),
         resolve_time=_norm_time(m.get("close_time")),
         source="kalshi",
     )
@@ -76,15 +78,24 @@ def fetch_settled_binary(
     base_url: str = KALSHI_PROD,
     series_ticker: str | None = None,
     timeout: float = 20.0,
+    dedupe_by_event: bool = True,
 ) -> list[ResolvedRecord]:
-    """Fetch up to ``limit`` settled binary markets from Kalshi's public API."""
+    """Fetch up to ``limit`` settled binary markets from Kalshi's public API.
+
+    ``dedupe_by_event`` keeps ONE market per ``event_ticker`` (default): strike
+    ladders like "CPI >=3.0 / >=3.2 / >=3.4" are one macro event wearing several
+    tickers, and counting them as independent observations manufactures
+    significance in the paired test (Fable rev 3 §1.2)."""
     import httpx
 
     records: list[ResolvedRecord] = []
+    seen_events: set[str] = set()
     cursor: str | None = None
+    # Over-fetch: many markets are deduped/void, so pages carry more than `limit`.
+    page = min(1000, max(100, limit * 3))
     with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as client:
         while len(records) < limit:
-            params: dict = {"status": "settled", "limit": min(1000, max(1, limit))}
+            params: dict = {"status": "settled", "limit": page}
             if cursor:
                 params["cursor"] = cursor
             if series_ticker:
@@ -96,6 +107,12 @@ def fetch_settled_binary(
             if not markets:
                 break
             for m in markets:
+                if dedupe_by_event:
+                    ev = m.get("event_ticker")
+                    if ev:
+                        if ev in seen_events:
+                            continue
+                        seen_events.add(ev)
                 rec = _to_record(m)
                 if rec is not None:
                     records.append(rec)
@@ -104,5 +121,8 @@ def fetch_settled_binary(
             cursor = data.get("cursor")
             if not cursor:
                 break
-    print(f"Kalshi: kept {len(records)} settled binary markets.")
+    print(
+        f"Kalshi: kept {len(records)} settled binary markets "
+        f"({'event-deduped' if dedupe_by_event else 'no dedupe'})."
+    )
     return records
