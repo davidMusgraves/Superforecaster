@@ -22,6 +22,13 @@ from .records import ResolvedRecord
 
 KALSHI_PROD = "https://api.elections.kalshi.com/trade-api/v2"
 
+# Clean, AIB-relevant categories. Kalshi's raw settled feed is dominated by
+# high-frequency SPORTS multi-value-event (MVE) collections; econ/politics
+# questions are spread thinly across hundreds of series (one macro release = one
+# event = many strike markets that dedup to a single question), so a clean corpus
+# must POOL series within a category rather than read one series or the raw feed.
+KALSHI_CLEAN_CATEGORIES = ("Economics", "Politics")
+
 
 def _int_id(ticker: str) -> int:
     """Stable int id from a Kalshi ticker (Python hash() isn't stable across runs)."""
@@ -129,6 +136,110 @@ def fetch_settled_binary(
     print(
         f"Kalshi: kept {len(records)} settled binary markets "
         f"({'event-deduped' if dedupe_by_event else 'no dedupe'})."
+    )
+    return records
+
+
+def _is_mve(m: dict) -> bool:
+    """True for a multi-value-event leg (sports 'who wins' ladders etc.). These are
+    the raw feed's bulk and are excluded from the clean pooled corpus."""
+    return bool(m.get("mve_collection_ticker"))
+
+
+def list_category_series(
+    categories=KALSHI_CLEAN_CATEGORIES,
+    base_url: str = KALSHI_PROD,
+    timeout: float = 20.0,
+) -> list[str]:
+    """Series tickers belonging to the given Kalshi categories."""
+    import httpx
+
+    out: list[str] = []
+    with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as client:
+        for cat in categories:
+            resp = client.get(f"{base_url}/series", params={"category": cat})
+            resp.raise_for_status()
+            for s in resp.json().get("series", []):
+                t = s.get("ticker")
+                if t:
+                    out.append(t)
+    return out
+
+
+def fetch_category_binary(
+    categories=KALSHI_CLEAN_CATEGORIES,
+    limit: int = 400,
+    base_url: str = KALSHI_PROD,
+    timeout: float = 20.0,
+    max_seconds: float | None = None,
+    per_series_scan: int = 300,
+    max_per_series: int = 6,
+    progress: bool = False,
+) -> list[ResolvedRecord]:
+    """Pool EVENT-DEDUPED, non-MVE settled binaries across every series in the given
+    categories — the representative clean corpus a Tier-1 screen needs.
+
+    Dedup is global across the pool (one record per event_ticker). ``max_per_series``
+    caps how many questions any one series contributes, so a high-frequency recurring
+    series (weekly jet-fuel/gas thresholds) can't flood the pool with autocorrelated
+    near-duplicates and manufacture significance. ``max_seconds`` bounds the walk
+    (the full econ+politics scan is a few minutes); pair with ``save_records`` to
+    build the persistent corpus once (B2)."""
+    import time
+
+    import httpx
+
+    t0 = time.time()
+    series = list_category_series(categories, base_url, timeout)
+    records: list[ResolvedRecord] = []
+    seen_events: set[str] = set()
+    with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as client:
+        for i, s in enumerate(series):
+            if len(records) >= limit:
+                break
+            if max_seconds is not None and time.time() - t0 > max_seconds:
+                break
+            cursor: str | None = None
+            walked = 0
+            from_series = 0
+            while walked < per_series_scan and len(records) < limit:
+                params: dict = {"status": "settled", "limit": 200, "series_ticker": s}
+                if cursor:
+                    params["cursor"] = cursor
+                try:
+                    resp = client.get(f"{base_url}/markets", params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception:
+                    break
+                markets = data.get("markets", [])
+                if not markets:
+                    break
+                for m in markets:
+                    walked += 1
+                    if from_series >= max_per_series:
+                        break
+                    if _is_mve(m):
+                        continue
+                    ev = m.get("event_ticker")
+                    if ev:
+                        if ev in seen_events:
+                            continue
+                        seen_events.add(ev)
+                    rec = _to_record(m)
+                    if rec is not None:
+                        records.append(rec)
+                        from_series += 1
+                if from_series >= max_per_series:
+                    break
+                cursor = data.get("cursor")
+                if not cursor:
+                    break
+            if progress and (i % 100 == 0):
+                print(f"  ...{i}/{len(series)} series, {len(records)} clean questions")
+    print(
+        f"Kalshi: pooled {len(records)} clean event-deduped binaries from "
+        f"{len(series)} {'/'.join(categories)} series."
     )
     return records
 
