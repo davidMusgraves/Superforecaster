@@ -26,7 +26,7 @@ def fetch_open_markets(
 
     out: list[MarketCandidate] = []
     offset = 0
-    page = 500
+    page = 100  # Gamma API caps limit at 100/call; page via offset until empty
     with httpx.Client(timeout=timeout, headers={"Accept": "application/json"}) as c:
         while len(out) < limit:
             resp = c.get(
@@ -43,7 +43,7 @@ def fetch_open_markets(
             resp.raise_for_status()
             markets = resp.json()
             if not markets:
-                break
+                break  # exhausted
             for m in markets:
                 try:
                     outs = json.loads(m.get("outcomes") or "[]")
@@ -71,8 +71,6 @@ def fetch_open_markets(
                 if len(out) >= limit:
                     break
             offset += len(markets)
-            if len(markets) < page:
-                break
             time.sleep(pace)
     print(f"Polymarket: {len(out)} open binary markets with a live price.")
     return out
