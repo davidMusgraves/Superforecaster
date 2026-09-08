@@ -91,6 +91,19 @@ def _bootstrap_ci(
     return round(lo, 5), round(hi, 5)
 
 
+def verdict_from_ci(mean_diff: float, lo: float | None, hi: float | None, mes: float) -> str:
+    """The four-bucket verdict from a mean paired diff and its bootstrap CI."""
+    if lo is None:
+        return "no data"
+    if hi < 0 and abs(mean_diff) >= mes:
+        return "graduate (treatment helps)"
+    if lo > 0 and abs(mean_diff) >= mes:
+        return "kill (treatment hurts)"
+    if lo <= 0 <= hi and (hi - lo) <= 2 * mes:
+        return "real null (no effect of interest)"
+    return "no information (underpowered)"
+
+
 def paired_brier(rows: list[Triple], mes: float = 0.01, n_boot: int = 5000) -> dict:
     """Paired Brier comparison with CI + Wilcoxon + a pre-registered MES verdict.
     ``mes`` is the minimum effect (Brier) worth acting on."""
@@ -115,16 +128,7 @@ def paired_brier(rows: list[Triple], mes: float = 0.01, n_boot: int = 5000) -> d
     mean_diff = sum(diffs) / n
     lo, hi = _bootstrap_ci(diffs, n_boot=n_boot)
 
-    if lo is None:
-        verdict = "no data"
-    elif hi < 0 and abs(mean_diff) >= mes:
-        verdict = "graduate (treatment helps)"
-    elif lo > 0 and abs(mean_diff) >= mes:
-        verdict = "kill (treatment hurts)"
-    elif lo <= 0 <= hi and (hi - lo) <= 2 * mes:
-        verdict = "real null (no effect of interest)"
-    else:
-        verdict = "no information (underpowered)"
+    verdict = verdict_from_ci(mean_diff, lo, hi, mes)
 
     return {
         "n": n,
