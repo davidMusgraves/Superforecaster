@@ -40,7 +40,10 @@ def fetch_open_markets(
                     "ascending": "false",
                 },
             )
-            resp.raise_for_status()
+            # Gamma caps how deep you can page (422 past a max offset); treat any
+            # non-200 as the end of results and keep what we have.
+            if resp.status_code != 200:
+                break
             markets = resp.json()
             if not markets:
                 break  # exhausted
